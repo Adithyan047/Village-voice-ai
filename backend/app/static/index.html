@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VILLAGE VOICE — Rural Community Infrastructure Intelligence</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            sandal: {
+              50: '#FDFBF7',
+              100: '#FAF6F0',
+              200: '#F3E9DD',
+              300: '#E7D7C3',
+              400: '#D5BEA2',
+              500: '#B89B77',
+              600: '#8C6D46',
+              700: '#6E5034',
+              800: '#523A23',
+              900: '#382615',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- React & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for inline JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { background-color: #FAF6F0; color: #2C241D; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .leaflet-container { width: 100%; height: 100%; border-radius: 0.5rem; z-index: 10; filter: grayscale(10%) contrast(95%); }
+    .sandal-card { background-color: #FFFFFF; border: 1px solid #E7D7C3; }
+    .sandal-card-alt { background-color: #FDFBF7; border: 1px solid #E7D7C3; }
+  </style>
+</head>
+<body class="bg-sandal-100 text-[#2C241D] font-sans antialiased selection:bg-sandal-300">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      const [viewMode, setViewMode] = useState('resident');
+      const [issues, setIssues] = useState([]);
+      const [presets, setPresets] = useState([]);
+      const [activeTraceId, setActiveTraceId] = useState(null);
+      const [activeTraces, setActiveTraces] = useState([]);
+      const [showEvalModal, setShowEvalModal] = useState(false);
+      const [activeIssue, setActiveIssue] = useState(null);
+
+      // Password Security State
+      const [authPin, setAuthPin] = useState(localStorage.getItem('village_voice_auth_pin') || '');
+      const [isAuthUnlocked, setIsAuthUnlocked] = useState(false);
+      const [pinInput, setPinInput] = useState('');
+      const [pinConfirmInput, setPinConfirmInput] = useState('');
+      const [authError, setAuthError] = useState('');
+
+      // Form State
+      const [reportText, setReportText] = useState('');
+      const [reportLang, setReportLang] = useState('en');
+      const [reportImg, setReportImg] = useState('');
+      const [isRecording, setIsRecording] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [processedResult, setProcessedResult] = useState(null);
+      const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+
+      // Eval State
+      const [evalLoading, setEvalLoading] = useState(false);
+      const [evalData, setEvalData] = useState(null);
+
+      const fetchIssues = async () => {
+        try {
+          const res = await fetch('/api/issues');
+          const data = await res.json();
+          setIssues(data.issues || []);
+        } catch (e) { console.error(e); }
+      };
+
+      const fetchPresets = async () => {
+        try {
+          const res = await fetch('/api/demo-presets');
+          const data = await res.json();
+          setPresets(data.presets || []);
+        } catch (e) { console.error(e); }
+      };
+
+      useEffect(() => {
+        fetchIssues();
+        fetchPresets();
+      }, []);
+
+      const handleSimulateVoice = () => {
+        setIsRecording(true);
+        setTimeout(() => {
+          setReportText('മൂന്ന് ദിവസമായി ഞങ്ങളുടെ വീട്ടിൽ വെള്ളമില്ല.');
+          setReportLang('ml');
+          setIsRecording(false);
+        }, 1000);
+      };
+
+      const handleSubmitReport = async (e) => {
+        e.preventDefault();
+        if (!reportText && !reportImg) return;
+        setLoading(true);
+        try {
+          const res = await fetch('/api/reports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              raw_text: reportText,
+              language: reportLang,
+              image_url: reportImg || null,
+              latitude: 10.0261,
+              longitude: 76.3125
+            })
+          });
+          const result = await res.json();
+          setProcessedResult(result);
+          fetchIssues();
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleUpdateStatus = async (issueId, newStatus) => {
+        await fetch(`/api/issues/${issueId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus })
+        });
+        fetchIssues();
+      };
+
+      const handleViewTrace = async (issueId) => {
+        setActiveTraceId(issueId);
+        try {
+          const res = await fetch(`/api/issues/${issueId}`);
+          const data = await res.json();
+          setActiveTraces(data.traces || []);
+        } catch (e) { console.error(e); }
+      };
+
+      const runEval = async () => {
+        setEvalLoading(true);
+        try {
+          const res = await fetch('/api/evaluate');
+          const data = await res.json();
+          setEvalData(data);
+        } catch (e) { console.error(e); }
+        finally { setEvalLoading(false); }
+      };
+
+      // Password Handlers
+      const handleSetupPin = (e) => {
+        e.preventDefault();
+        if (!pinInput || pinInput.length < 4) {
+          setAuthError('Password must be at least 4 characters');
+          return;
+        }
+        if (pinInput !== pinConfirmInput) {
+          setAuthError('Passwords do not match');
+          return;
+        }
+        localStorage.setItem('village_voice_auth_pin', pinInput);
+        setAuthPin(pinInput);
+        setIsAuthUnlocked(true);
+        setPinInput('');
+        setPinConfirmInput('');
+        setAuthError('');
+      };
+
+      const handleUnlockPin = (e) => {
+        e.preventDefault();
+        if (pinInput === authPin) {
+          setIsAuthUnlocked(true);
+          setPinInput('');
+          setAuthError('');
+        } else {
+          setAuthError('Incorrect password');
+        }
+      };
+
+      // Metrics
+      const totalReports = issues.reduce((acc, curr) => acc + curr.affected_reports_count, 0);
+      const totalIssues = issues.length;
+      const criticalCount = issues.filter(i => i.priority_score >= 85).length;
+      const reviewCount = issues.filter(i => i.needs_human_review).length;
+      const resolvedCount = issues.filter(i => i.status === 'RESOLVED').length;
+      const resolutionRate = totalIssues > 0 ? Math.round((resolvedCount / totalIssues) * 100) : 0;
+
+      return (
+        <div className="min-h-screen bg-sandal-100 flex flex-col">
+          {/* Header */}
+          <header className="bg-white border-b border-sandal-300 text-sandal-900 sticky top-0 z-40 shadow-sm">
+            <div className="max-w-6xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-sandal-600 text-white flex items-center justify-center font-bold text-sm">
+                  VV
+                </div>
+                <div>
+                  <h1 className="text-base font-bold tracking-tight text-sandal-900">VILLAGE VOICE</h1>
+                  <p className="text-xs text-sandal-700">Rural Infrastructure Intelligence Platform</p>
+                </div>
+              </div>
+
+              {/* Demo Presets Dropdown */}
+              <div className="flex items-center gap-2">
+                <select
+                  className="bg-sandal-50 border border-sandal-300 text-xs text-sandal-900 rounded-md px-2.5 py-1.5 focus:outline-none focus:border-sandal-600 font-medium"
+                  onChange={(e) => {
+                    const preset = presets.find(p => p.id === e.target.value);
+                    if (preset) {
+                      setReportText(preset.raw_text);
+                      setReportLang(preset.language);
+                      setReportImg(preset.image_url || '');
+                      setViewMode('resident');
+                    }
+                  }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select Demo Scenario...</option>
+                  {presets.map(p => (
+                    <option key={p.id} value={p.id}>{p.title.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim()}</option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={() => { setShowEvalModal(true); runEval(); }}
+                  className="bg-sandal-50 hover:bg-sandal-200 text-sandal-800 border border-sandal-300 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors"
+                >
+                  Evaluation Metrics
+                </button>
+              </div>
+
+              {/* View Switcher */}
+              <div className="bg-sandal-200 p-1 rounded-md border border-sandal-300 flex items-center gap-1">
+                <button
+                  onClick={() => setViewMode('resident')}
+                  className={`px-3 py-1 rounded text-xs font-semibold transition-all ${viewMode === 'resident' ? 'bg-white text-sandal-900 shadow-sm' : 'text-sandal-700 hover:text-sandal-900'}`}
+                >
+                  Resident View
+                </button>
+                <button
+                  onClick={() => setViewMode('authority')}
+                  className={`px-3 py-1 rounded text-xs font-semibold transition-all ${viewMode === 'authority' ? 'bg-sandal-600 text-white shadow-sm' : 'text-sandal-700 hover:text-sandal-900'}`}
+                >
+                  Authority Portal
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Body */}
+          <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-6">
+            {viewMode === 'resident' ? (
+              <div className="max-w-xl mx-auto space-y-6">
+                <div className="sandal-card rounded-lg p-6 space-y-2 border border-sandal-300">
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-sandal-700">Voice, Text & Image Intake</span>
+                  <h2 className="text-xl font-bold text-sandal-900">Report Community Infrastructure Issue</h2>
+                  <p className="text-sandal-700 text-xs leading-relaxed">
+                    Submit public complaints regarding water disruptions, road damage, waste, or electricity in Malayalam or English.
+                  </p>
+                </div>
+
+                {!processedResult ? (
+                  <form onSubmit={handleSubmitReport} className="sandal-card rounded-lg p-6 space-y-5">
+                    <div className="bg-sandal-50 border border-sandal-300 rounded-lg p-4 text-center space-y-2">
+                      <span className="text-xs font-medium text-sandal-700 block">Voice Recording Intake</span>
+                      <button
+                        type="button"
+                        onClick={handleSimulateVoice}
+                        disabled={isRecording}
+                        className={`px-4 py-2 rounded text-xs font-bold transition-all ${isRecording ? 'bg-amber-600 text-white' : 'bg-sandal-600 hover:bg-sandal-700 text-white'}`}
+                      >
+                        {isRecording ? 'Listening...' : 'Simulate Voice Input (Malayalam)'}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-sandal-800 flex justify-between">
+                        <span>Report Description</span>
+                        <span className="font-normal text-sandal-600">Malayalam & English Supported</span>
+                      </label>
+                      <textarea
+                        value={reportText}
+                        onChange={(e) => setReportText(e.target.value)}
+                        rows={3}
+                        placeholder="Describe the complaint..."
+                        className="w-full border border-sandal-300 rounded p-3 text-xs bg-white focus:outline-none focus:border-sandal-600 text-sandal-900"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-sandal-800">Attach Image URL (Optional)</label>
+                      <input
+                        type="text"
+                        value={reportImg}
+                        onChange={(e) => setReportImg(e.target.value)}
+                        placeholder="Image URL or reference link..."
+                        className="w-full border border-sandal-300 rounded px-3 py-2 text-xs bg-white focus:outline-none focus:border-sandal-600"
+                      />
+                    </div>
+
+                    <div className="bg-sandal-50 border border-sandal-300 rounded p-3 text-xs text-sandal-800 flex justify-between items-center font-medium">
+                      <span>Detected Location: Ward 4, Kizhakkambalam East (10.0261° N, 76.3125° E)</span>
+                      <span className="text-[10px] bg-sandal-200 text-sandal-800 px-2 py-0.5 rounded font-bold">GPS Active</span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={loading || (!reportText && !reportImg)}
+                      className="w-full bg-sandal-600 hover:bg-sandal-700 text-white font-bold py-3 rounded text-xs transition-colors disabled:opacity-50"
+                    >
+                      {loading ? 'Processing Complaint...' : 'Submit Report'}
+                    </button>
+                  </form>
+                ) : (
+                  <div className="sandal-card rounded-lg p-6 space-y-5">
+                    <div className="flex justify-between items-center border-b border-sandal-200 pb-3">
+                      <span className="text-sm font-bold text-sandal-900">Report Processed Successfully</span>
+                      <span className="bg-sandal-200 text-sandal-800 text-xs font-bold px-2.5 py-0.5 rounded">
+                        Confidence: {Math.round(processedResult.confidence * 100)}%
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs bg-sandal-50 p-3.5 rounded border border-sandal-200">
+                      <div><span className="text-sandal-600 block">Original Text</span><p className="font-semibold">{processedResult.original_text}</p></div>
+                      <div><span className="text-sandal-600 block">Normalized Text</span><p className="font-semibold">{processedResult.normalized_text}</p></div>
+                      <div><span className="text-sandal-600 block">Category</span><p className="font-bold text-sandal-800">{processedResult.category}</p></div>
+                      <div><span className="text-sandal-600 block">Severity & Duration</span><p className="font-semibold">{processedResult.severity} ({processedResult.duration_days} days)</p></div>
+                      <div><span className="text-sandal-600 block">Calculated Priority</span><p className="font-bold">{processedResult.priority_score} / 100</p></div>
+                      <div><span className="text-sandal-600 block">Routing Action</span><p className="font-bold">{processedResult.routing_decision}</p></div>
+                    </div>
+
+                    {processedResult.rag_sources && processedResult.rag_sources.length > 0 && (
+                      <div className="bg-sandal-50 border border-sandal-300 rounded p-3 text-xs text-sandal-900 space-y-1">
+                        <span className="font-bold block">Grounded RAG Guideline Citation:</span>
+                        <p className="italic text-sandal-700">{processedResult.rag_sources[0].title} — {processedResult.rag_sources[0].citation}</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => setFeedbackSubmitted(true)} className="flex-1 bg-sandal-600 text-white font-bold py-2 rounded text-xs">
+                        Confirm & Save Report
+                      </button>
+                      <button onClick={() => setProcessedResult(null)} className="bg-sandal-200 text-sandal-800 font-semibold px-4 py-2 rounded text-xs">
+                        Edit
+                      </button>
+                    </div>
+                    {feedbackSubmitted && <p className="text-xs text-sandal-700 font-bold text-center">Report recorded and routed to Authority Portal.</p>}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Authority Portal Security Check */
+              !isAuthUnlocked ? (
+                <div className="max-w-md mx-auto sandal-card rounded-lg p-6 space-y-5 border border-sandal-300 mt-8 shadow-sm">
+                  {!authPin ? (
+                    /* Initial Password Setup */
+                    <form onSubmit={handleSetupPin} className="space-y-4">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-sandal-600 block">First Time Setup</span>
+                        <h3 className="text-lg font-bold text-sandal-900">Set Up Authority Access Password</h3>
+                        <p className="text-xs text-sandal-700 mt-1">Create a password to restrict Authority Portal access.</p>
+                      </div>
+
+                      {authError && <p className="text-xs text-red-700 font-semibold">{authError}</p>}
+
+                      <div className="space-y-3 text-xs">
+                        <div>
+                          <label className="font-bold text-sandal-800 block mb-1">New Password</label>
+                          <input
+                            type="password"
+                            value={pinInput}
+                            onChange={(e) => setPinInput(e.target.value)}
+                            placeholder="Enter new password..."
+                            className="w-full border border-sandal-300 rounded p-2.5 bg-white focus:outline-none focus:border-sandal-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-sandal-800 block mb-1">Confirm Password</label>
+                          <input
+                            type="password"
+                            value={pinConfirmInput}
+                            onChange={(e) => setPinConfirmInput(e.target.value)}
+                            placeholder="Confirm password..."
+                            className="w-full border border-sandal-300 rounded p-2.5 bg-white focus:outline-none focus:border-sandal-600"
+                          />
+                        </div>
+                      </div>
+
+                      <button type="submit" className="w-full bg-sandal-600 hover:bg-sandal-700 text-white font-bold py-2.5 rounded text-xs">
+                        Save Password & Unlock Portal
+                      </button>
+                    </form>
+                  ) : (
+                    /* Password Login Prompt */
+                    <form onSubmit={handleUnlockPin} className="space-y-4">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-sandal-600 block">Restricted Access</span>
+                        <h3 className="text-lg font-bold text-sandal-900">Enter Authority Password</h3>
+                        <p className="text-xs text-sandal-700 mt-1">Provide master password to view municipal dashboard.</p>
+                      </div>
+
+                      {authError && <p className="text-xs text-red-700 font-semibold">{authError}</p>}
+
+                      <div className="text-xs">
+                        <label className="font-bold text-sandal-800 block mb-1">Password</label>
+                        <input
+                          type="password"
+                          value={pinInput}
+                          onChange={(e) => setPinInput(e.target.value)}
+                          placeholder="Enter password..."
+                          className="w-full border border-sandal-300 rounded p-2.5 bg-white focus:outline-none focus:border-sandal-600"
+                        />
+                      </div>
+
+                      <button type="submit" className="w-full bg-sandal-600 hover:bg-sandal-700 text-white font-bold py-2.5 rounded text-xs">
+                        Unlock Authority Portal
+                      </button>
+                    </form>
+                  )}
+                </div>
+              ) : (
+                /* Unlocked Authority Dashboard */
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-sandal-900">Municipal Authority Operations</h2>
+                    <button
+                      onClick={() => setIsAuthUnlocked(false)}
+                      className="bg-sandal-200 hover:bg-sandal-300 text-sandal-900 text-xs px-3 py-1.5 rounded font-semibold border border-sandal-300"
+                    >
+                      Lock Portal
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="sandal-card rounded p-3.5">
+                      <span className="text-xl font-bold text-sandal-900 block">{totalReports}</span>
+                      <span className="text-xs text-sandal-700 font-medium">Resident Reports</span>
+                    </div>
+                    <div className="sandal-card rounded p-3.5">
+                      <span className="text-xl font-bold text-sandal-900 block">{totalIssues}</span>
+                      <span className="text-xs text-sandal-700 font-medium">Clustered Issues</span>
+                    </div>
+                    <div className="sandal-card rounded p-3.5">
+                      <span className="text-xl font-bold text-amber-800 block">{criticalCount}</span>
+                      <span className="text-xs text-sandal-700 font-medium">Critical Priority</span>
+                    </div>
+                    <div className="sandal-card rounded p-3.5">
+                      <span className="text-xl font-bold text-amber-800 block">{reviewCount}</span>
+                      <span className="text-xs text-sandal-700 font-medium">Escalation Queue</span>
+                    </div>
+                    <div className="sandal-card rounded p-3.5">
+                      <span className="text-xl font-bold text-sandal-800 block">{resolutionRate}%</span>
+                      <span className="text-xs text-sandal-700 font-medium">Resolution Rate</span>
+                    </div>
+                  </div>
+
+                  <div className="sandal-card rounded-lg p-5 space-y-4">
+                    <h3 className="font-bold text-sandal-900 text-sm">Actionable Issues Queue</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-sandal-900">
+                        <thead className="bg-sandal-50 text-[11px] uppercase font-bold text-sandal-700 border-y border-sandal-200">
+                          <tr>
+                            <th className="py-2.5 px-3">Priority</th>
+                            <th className="py-2.5 px-3">Category & Title</th>
+                            <th className="py-2.5 px-3">Ward / Reports</th>
+                            <th className="py-2.5 px-3">Assigned Dept</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-sandal-200">
+                          {issues.map(iss => (
+                            <tr key={iss.id} className="hover:bg-sandal-50">
+                              <td className="py-2.5 px-3">
+                                <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${iss.priority_score >= 85 ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-sandal-200 text-sandal-900'}`}>
+                                  {iss.priority_score} / 100
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className="text-[10px] font-bold text-sandal-700 block uppercase">{iss.category}</span>
+                                <h4 className="font-semibold text-sandal-900">{iss.title}</h4>
+                              </td>
+                              <td className="py-2.5 px-3 text-xs">
+                                <span className="font-medium text-sandal-900 block">{iss.ward}</span>
+                                <span className="text-sandal-700">{iss.affected_reports_count} reports</span>
+                              </td>
+                              <td className="py-2.5 px-3 text-xs font-medium">{iss.assigned_department}</td>
+                              <td className="py-2.5 px-3">
+                                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-sandal-200 text-sandal-900">{iss.status}</span>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="flex gap-2">
+                                  <button onClick={() => setActiveIssue(iss)} className="bg-sandal-100 hover:bg-sandal-200 text-sandal-900 text-[11px] px-2.5 py-1 rounded font-medium border border-sandal-300">Inspect</button>
+                                  <button onClick={() => handleViewTrace(iss.id)} className="bg-sandal-600 hover:bg-sandal-700 text-white text-[11px] px-2.5 py-1 rounded font-medium">Trace Log</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+          </main>
+
+          {/* Inspect Issue Modal */}
+          {activeIssue && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex justify-end">
+              <div className="w-full max-w-xl bg-white h-full overflow-y-auto p-6 space-y-5 shadow-xl border-l border-sandal-300">
+                <div className="flex justify-between border-b border-sandal-200 pb-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-sandal-700 uppercase">{activeIssue.category}</span>
+                    <h3 className="text-lg font-bold text-sandal-900">{activeIssue.title}</h3>
+                  </div>
+                  <button onClick={() => setActiveIssue(null)} className="font-bold text-sm text-sandal-600">Close</button>
+                </div>
+
+                <div className="bg-sandal-50 border border-sandal-300 p-3.5 rounded space-y-2">
+                  <span className="text-[11px] font-bold text-sandal-700 uppercase">Workflow State Transition</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => { handleUpdateStatus(activeIssue.id, 'Assigned'); setActiveIssue({...activeIssue, status: 'Assigned'}); }} className="bg-sandal-700 text-white text-xs font-bold px-3 py-1.5 rounded">Assign</button>
+                    <button onClick={() => { handleUpdateStatus(activeIssue.id, 'In Progress'); setActiveIssue({...activeIssue, status: 'In Progress'}); }} className="bg-sandal-800 text-white text-xs font-bold px-3 py-1.5 rounded">Start Work</button>
+                    <button onClick={() => { handleUpdateStatus(activeIssue.id, 'Resolved'); setActiveIssue({...activeIssue, status: 'Resolved'}); }} className="bg-sandal-600 text-white text-xs font-bold px-3 py-1.5 rounded">Resolve</button>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-sandal-300 rounded p-3.5 space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <h4 className="font-bold text-sandal-900">Priority Score Formula</h4>
+                    <span className="font-extrabold text-sandal-900">{activeIssue.priority_score} / 100</span>
+                  </div>
+                  <p className="text-sandal-700 italic">"{activeIssue.priority_breakdown.reasoning}"</p>
+                </div>
+
+                <div className="bg-sandal-50 border border-sandal-300 rounded p-3.5 text-xs space-y-2">
+                  <span className="font-bold text-sandal-900 block">Retrieved RAG Guideline Context:</span>
+                  {activeIssue.rag_sources.map((src, idx) => (
+                    <div key={idx} className="bg-white p-2.5 rounded border border-sandal-200 text-sandal-800">
+                      <span className="font-semibold text-sandal-900 block">{src.title} ({src.doc})</span>
+                      <p>{src.citation}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Trace Log Modal */}
+          {activeTraceId && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+              <div className="bg-white border border-sandal-300 text-sandal-900 w-full max-w-2xl rounded-lg p-6 max-h-[85vh] overflow-y-auto space-y-4 shadow-xl">
+                <div className="flex justify-between border-b border-sandal-200 pb-3">
+                  <h3 className="font-bold text-base text-sandal-900">Multi-Agent Observability Trace ({activeTraceId})</h3>
+                  <button onClick={() => setActiveTraceId(null)} className="font-bold text-sm">Close</button>
+                </div>
+                {activeTraces.map((step, idx) => (
+                  <div key={idx} className="bg-sandal-50 border border-sandal-200 p-3 rounded text-xs space-y-1">
+                    <div className="flex justify-between font-bold text-sandal-900">
+                      <span>Step {idx + 1}: {step.agent_name}</span>
+                      <span className="text-sandal-600 font-mono text-[11px]">{step.timestamp}</span>
+                    </div>
+                    <p className="text-sandal-800">{step.action}</p>
+                    <div className="bg-white border border-sandal-200 p-2 rounded text-[11px] font-mono text-sandal-900 space-y-0.5">
+                      <div>INPUT: {step.input_summary}</div>
+                      <div>OUTPUT: {step.output_summary}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Evaluation Modal */}
+          {showEvalModal && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+              <div className="bg-white border border-sandal-300 text-sandal-900 w-full max-w-3xl rounded-lg p-6 max-h-[85vh] overflow-y-auto space-y-5 shadow-xl">
+                <div className="flex justify-between border-b border-sandal-200 pb-3">
+                  <h3 className="font-bold text-base text-sandal-900">Evaluation Benchmark Results</h3>
+                  <button onClick={() => setShowEvalModal(false)} className="font-bold text-sm">Close</button>
+                </div>
+
+                {evalLoading ? (
+                  <p className="text-center py-6 text-sandal-700 text-xs">Evaluating 20 gold trajectories...</p>
+                ) : evalData ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-3 text-center text-xs">
+                      <div className="sandal-card p-3 rounded">
+                        <span className="text-xl font-bold text-sandal-900 block">{evalData.category_accuracy}</span>
+                        <span className="text-[11px] text-sandal-700">Classification</span>
+                      </div>
+                      <div className="sandal-card p-3 rounded">
+                        <span className="text-xl font-bold text-sandal-900 block">{evalData.severity_accuracy}</span>
+                        <span className="text-[11px] text-sandal-700">Severity</span>
+                      </div>
+                      <div className="sandal-card p-3 rounded">
+                        <span className="text-xl font-bold text-sandal-900 block">{evalData.priority_accuracy}</span>
+                        <span className="text-[11px] text-sandal-700">Priority Scoring</span>
+                      </div>
+                      <div className="sandal-card p-3 rounded">
+                        <span className="text-xl font-bold text-sandal-900 block">{evalData.safety_escalation_accuracy}</span>
+                        <span className="text-[11px] text-sandal-700">Safety Escalation</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
